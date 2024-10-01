@@ -25,7 +25,7 @@
 #include "Whisper.h"
 #include "Audio.h"
 #include "CloudSpeechClient.h"
-#include "WakeWord.h"
+#include "driver_wake_word.hpp"
 
 // 保存する質問と回答の最大数
 const int MAX_HISTORY = 5;
@@ -90,7 +90,7 @@ String TTS_SPEAKER_NO = "3";
 String TTS_SPEAKER = "&speaker=";
 String TTS_PARMS = TTS_SPEAKER + TTS_SPEAKER_NO;
 //---------------------------------------------
-bool wakeword_is_enable = false;
+// bool wakeword_is_enable = false;
 //---------------------------------------------
 // C++11 multiline string constants are neato...
 static const char HEAD[] PROGMEM = R"KEWL(
@@ -1109,7 +1109,7 @@ void setup()
   mp3 = new AudioGeneratorMP3();
 //  mp3->RegisterStatusCB(StatusCallback, (void*)"mp3");
 #if !defined( ARDUINO_M5Stack_Core_ESP32 )
-  wakeword_init();
+  WAKE_WORD::init();
 #endif
   avatar.init();
   avatar.addTask(lipSync, "lipSync");
@@ -1131,7 +1131,7 @@ bool random_speak = true;
 static int lastms1 = 0;
 
 void report_batt_level(){
-  mode = 0;
+  WAKE_WORD::mode = 0;
   char buff[100];
    int level = M5.Power.getBatteryLevel();
   if(M5.Power.isCharging())
@@ -1139,7 +1139,7 @@ void report_batt_level(){
   else
     sprintf(buff,"バッテリーのレベルは%d％です。",level);
   avatar.setExpression(Expression::Happy);
-  mode = 0; 
+  WAKE_WORD::mode = 0; 
   speech_text = String(buff);
   delay(1000);
   avatar.setExpression(Expression::Neutral);
@@ -1147,7 +1147,7 @@ void report_batt_level(){
 
 void switch_monologue_mode(){
     String tmp;
-    mode = 0;
+    WAKE_WORD::mode = 0;
     if(random_speak) {
       tmp = "独り言始めます。";
       lastms1 = millis();
@@ -1158,7 +1158,7 @@ void switch_monologue_mode(){
     }
     random_speak = !random_speak;
     avatar.setExpression(Expression::Happy);
-    mode = 0;
+    WAKE_WORD::mode = 0;
     speech_text = tmp;
     delay(1000);
     avatar.setExpression(Expression::Neutral);
@@ -1198,7 +1198,7 @@ void SST_ChatGPT() {
           Serial.println(ret);
           if (!mp3->isRunning() && speech_text=="" && speech_text_buffer == "") {
             exec_chatGPT(ret);
-            mode = 0;
+            WAKE_WORD::mode = 0;
           }
         } else {
           Serial.println("音声認識失敗");
@@ -1220,7 +1220,7 @@ void loop()
     random_time = 40000 + 1000 * random(30);
     if (!mp3->isRunning() && speech_text=="" && speech_text_buffer == "") {
       exec_chatGPT(random_words[random(18)]);
-      mode = 0;
+      WAKE_WORD::mode = 0;
     }
   }
 
@@ -1240,16 +1240,16 @@ void loop()
 #else
   if (M5.BtnA.wasPressed())
   {
-    if(mode >= 0){
+    if(WAKE_WORD::mode >= 0){
       sw_tone();
-      if(mode == 0){
+      if(WAKE_WORD::mode == 0){
         avatar.setSpeechText("ウェイクワード有効");
-        mode = 1;
-        wakeword_is_enable = true;
+        WAKE_WORD::mode = 1;
+        WAKE_WORD::is_enable = true;
       } else {
         avatar.setSpeechText("ウェイクワード無効");
-        mode = 0;
-        wakeword_is_enable = false;
+        WAKE_WORD::mode = 0;
+        WAKE_WORD::is_enable = false;
       }
       delay(1000);
       avatar.setSpeechText("");
@@ -1266,8 +1266,8 @@ void loop()
     M5.Mic.begin();
     random_time = -1;           //独り言停止
     random_speak = true;
-    wakeword_is_enable = false; //wakeword 無効
-    mode = -1;
+    WAKE_WORD::is_enable = false;
+    WAKE_WORD::mode = -1;
 #ifdef USE_SERVO
       servo_home = true;
       delay(500);
@@ -1322,7 +1322,7 @@ void loop()
     Serial.println(speech_text_buffer);
     M5.Mic.end();
     M5.Speaker.begin();
-    mode = 0;
+    WAKE_WORD::mode = 0;
     Voicevox_tts((char*)speech_text_buffer.c_str(), (char*)TTS_PARMS.c_str());
   }
 
@@ -1336,29 +1336,33 @@ void loop()
       delay(200);
       M5.Speaker.end();
       M5.Mic.begin();
-      if(wakeword_is_enable) mode = 1;
-      else  mode = 0;
+      if(WAKE_WORD::is_enable) {
+        WAKE_WORD::mode = 1;
+      } else {
+        WAKE_WORD::mode = 0;
+      }
     }
     delay(1);
   } else {
   server.handleClient();
   }
 
-  if (mode == 0) { return; }
-  else if (mode < 0) {
-    if(wakeword_regist()){
+  if (WAKE_WORD::mode == 0) {
+      return;
+  } else if (WAKE_WORD::mode < 0) {
+    if(WAKE_WORD::regist()){
       avatar.setSpeechText("ウェイクワード登録終了");
       delay(1000);
       avatar.setSpeechText("");
-      mode = 0;
-      wakeword_is_enable = false;
+      WAKE_WORD::mode = 0;
+      WAKE_WORD::is_enable = false;
 #ifdef USE_SERVO
       servo_home = false;
 #endif
     }
   }
-  else if (mode > 0 && wakeword_is_enable) {
-    if( wakeword_compare()){
+  else if (WAKE_WORD::mode > 0 && WAKE_WORD::is_enable) {
+    if( WAKE_WORD::compare()){
         Serial.println("wakeword_compare OK!");
         sw_tone();
         SST_ChatGPT();
