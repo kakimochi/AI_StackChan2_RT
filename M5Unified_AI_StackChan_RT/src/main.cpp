@@ -57,7 +57,7 @@ String TTS_SPEAKER_NO = "3";
 String TTS_SPEAKER = "&speaker=";
 String TTS_PARMS = TTS_SPEAKER + TTS_SPEAKER_NO;
 //---------------------------------------------
-// bool wakeword_is_enable = false;
+
 //---------------------------------------------
 // C++11 multiline string constants are neato...
 static const char HEAD[] PROGMEM = R"KEWL(
