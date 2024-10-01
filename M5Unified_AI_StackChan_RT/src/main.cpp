@@ -4,7 +4,8 @@
 #include <SPIFFS.h>
 #include <M5Unified.h>
 #include <nvs.h>
-#include <Avatar.h>
+#include "driver_avatar.hpp"
+// #include <Avatar.h>
 
 #include <AudioOutput.h>
 #include <AudioFileSourceBuffer.h>
@@ -26,6 +27,7 @@
 #include "Audio.h"
 #include "CloudSpeechClient.h"
 #include "driver_wake_word.hpp"
+#include "driver_servo.hpp"
 
 // 保存する質問と回答の最大数
 const int MAX_HISTORY = 5;
@@ -42,43 +44,8 @@ std::deque<String> chatHistory;
 
 //#define USE_INTERNAL_MIC // タカオ版でM5Stack Core2やS3で内蔵マイクを使いたい場合はコメントアウトする。
 
-
-#define USE_SERVO
-#ifdef USE_SERVO
-#if defined( ARDUINO_M5STACK_Core2 )
-  #define SERVO_PIN_RXD2 13  //SERIAL2 PORT
-  #define SERVO_PIN_TXD2 14
-// #elif defined( ARDUINO_M5STACK_CORES3 )
-//   #define SERVO_PIN_RXD2 18  //SERIAL2 PORT
-//   #define SERVO_PIN_TXD2 17
-#else
-  #define SERVO_PIN_RXD2 16  //SERIAL2 PORT
-  #define SERVO_PIN_TXD2 17
-#endif
-
-#include <SCServo.h>
-SCSCL sc;
-void servo(int id, int pos)
-{
-//  sc.WritePos(id, map(pos, 0, 300, 0, 1023), 0, 300);
-  sc.WritePos(id, map(pos, 0, 300, 0, 1023), 500, 70);
-}
-
-#endif
-
 /// set M5Speaker virtual channel (0-7)
 static constexpr uint8_t m5spk_virtual_channel = 0;
-
-using namespace m5avatar;
-Avatar avatar;
-const Expression expressions_table[] = {
-  Expression::Neutral,
-  Expression::Happy,
-  Expression::Sleepy,
-  Expression::Doubt,
-  Expression::Sad,
-  Expression::Angry
-};
 
 ESP32WebServer server(80);
 
@@ -251,7 +218,7 @@ void handle_speech() {
   ////////////////////////////////////////
   // 音声の発声
   ////////////////////////////////////////
-  avatar.setExpression(Expression::Happy);
+  AVATAR::avatar.setExpression(Expression::Happy);
   Voicevox_tts((char*)message.c_str(), (char*)TTS_PARMS.c_str());
   server.send(200, "text/plain", String("OK"));
 }
@@ -304,11 +271,11 @@ String https_post_json(const char* url, const char* json_string, const char* roo
 
 String chatGpt(String json_string) {
   String response = "";;
-  avatar.setExpression(Expression::Doubt);
-  avatar.setSpeechText("考え中…");
+  AVATAR::avatar.setExpression(Expression::Doubt);
+  AVATAR::avatar.setSpeechText("考え中…");
   String ret = https_post_json("https://api.openai.com/v1/chat/completions", json_string.c_str(), root_ca_openai);
-  avatar.setExpression(Expression::Neutral);
-  avatar.setSpeechText("");
+  AVATAR::avatar.setExpression(Expression::Neutral);
+  AVATAR::avatar.setSpeechText("");
   Serial.println(ret);
   if(ret != ""){
     DynamicJsonDocument doc(2000);
@@ -316,12 +283,12 @@ String chatGpt(String json_string) {
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.f_str());
-      avatar.setExpression(Expression::Sad);
-      avatar.setSpeechText("エラーです");
+      AVATAR::avatar.setExpression(Expression::Sad);
+      AVATAR::avatar.setSpeechText("エラーです");
       response = "エラーです";
       delay(1000);
-      avatar.setSpeechText("");
-      avatar.setExpression(Expression::Neutral);
+      AVATAR::avatar.setSpeechText("");
+      AVATAR::avatar.setExpression(Expression::Neutral);
     }else{
       const char* data = doc["choices"][0]["message"]["content"];
       Serial.println(data);
@@ -329,12 +296,12 @@ String chatGpt(String json_string) {
       std::replace(response.begin(),response.end(),'\n',' ');
     }
   } else {
-    avatar.setExpression(Expression::Sad);
-    avatar.setSpeechText("わかりません");
+    AVATAR::avatar.setExpression(Expression::Sad);
+    AVATAR::avatar.setSpeechText("わかりません");
     response = "わかりません";
     delay(1000);
-    avatar.setSpeechText("");
-    avatar.setExpression(Expression::Neutral);
+    AVATAR::avatar.setSpeechText("");
+    AVATAR::avatar.setExpression(Expression::Neutral);
   }
   return response;
 }
@@ -581,12 +548,12 @@ void handle_face() {
   Serial.println(expression);
   switch (expression.toInt())
   {
-    case 0: avatar.setExpression(Expression::Neutral); break;
-    case 1: avatar.setExpression(Expression::Happy); break;
-    case 2: avatar.setExpression(Expression::Sleepy); break;
-    case 3: avatar.setExpression(Expression::Doubt); break;
-    case 4: avatar.setExpression(Expression::Sad); break;
-    case 5: avatar.setExpression(Expression::Angry); break;  
+    case 0: AVATAR::avatar.setExpression(Expression::Neutral); break;
+    case 1: AVATAR::avatar.setExpression(Expression::Happy); break;
+    case 2: AVATAR::avatar.setExpression(Expression::Sleepy); break;
+    case 3: AVATAR::avatar.setExpression(Expression::Doubt); break;
+    case 4: AVATAR::avatar.setExpression(Expression::Sad); break;
+    case 5: AVATAR::avatar.setExpression(Expression::Angry); break;  
   } 
   server.send(200, "text/plain", String("OK"));
 }
@@ -667,20 +634,12 @@ void StatusCallback(void *cbData, int code, const char *string)
   Serial.flush();
 }
 
-#ifdef USE_SERVO
-#define ID_X 1
-#define ID_Y 2
-#define START_DEGREE_VALUE_X 150
-#define START_DEGREE_VALUE_Y 160
-bool servo_home = false;
-#endif
-
 void lipSync(void *args)
 {
   float gazeX, gazeY;
   int level = 0;
-  DriveContext *ctx = (DriveContext *)args;
-  Avatar *avatar = ctx->getAvatar();
+  // DriveContext *ctx = (DriveContext *)args;
+  // Avatar *avatar = ctx->getAvatar();
   for (;;)
   {
     level = abs(*out.getBuffer());
@@ -690,55 +649,11 @@ void lipSync(void *args)
       level = 15000;
     }
     float open = (float)level/15000.0;
-    avatar->setMouthOpenRatio(open);
-    avatar->getGaze(&gazeY, &gazeX);
-    avatar->setRotation(gazeX * 5);
+    AVATAR::avatar.setMouthOpenRatio(open);
+    AVATAR::avatar.getGaze(&gazeY, &gazeX);
+    AVATAR::avatar.setRotation(gazeX * 5);
     delay(50);
   }
-}
-
-void servo(void *args)
-{
-  float gazeX, gazeY;
-  float mouth_ratio = 0.0;
-  DriveContext *ctx = (DriveContext *)args;
-  Avatar *avatar = ctx->getAvatar();
-  for (;;)
-  {
- #ifdef USE_SERVO
-    avatar->getGaze(&gazeY, &gazeX);
-//    mouth_ratio = avatar->getMouthOpenRatio();
-//    gazeX *= -1.0;
-    gazeY *= -1.0;    
-    if(!servo_home)
-    {
-        servo(1,START_DEGREE_VALUE_X - (int)(10.0 * gazeX));
-        if(gazeY < 0) {
-          int tmp = (int)(7.0 * (gazeY * -1) + mouth_ratio * 10.0);
-          if(tmp > 10) tmp = 10;
-            servo(2,START_DEGREE_VALUE_Y - tmp);
-        } else {
-          servo(2,START_DEGREE_VALUE_Y + (int)(7.0 * gazeY) - mouth_ratio * 10.0);
-        }
-    } else {
-       servo(1,START_DEGREE_VALUE_X); 
-       servo(2,START_DEGREE_VALUE_Y);
-    }
- #endif
-    delay(3000);
-  }
-}
-
-void Servo_setup() {
-#ifdef USE_SERVO
-//  Serial2.begin(1000000, SERIAL_8N1, 13, 14); //PORT C / M-BUS
-//  Serial2.begin(1000000, SERIAL_8N1, 33, 32); //PORT A
-//  Serial2.begin(1000000, SERIAL_8N1, 16, 17); //Serial2
-  Serial2.begin(1000000, SERIAL_8N1, SERVO_PIN_RXD2, SERVO_PIN_TXD2); //Serial2
-  sc.pSerial = &Serial2;
-  servo(1 ,START_DEGREE_VALUE_X);
-  servo(2 ,START_DEGREE_VALUE_Y);
-#endif
 }
 
 #if defined(ARDUINO_M5STACK_Core2) || defined(ARDUINO_M5STACK_CoreS3)
@@ -826,7 +741,7 @@ String SpeechToText(bool isGoogle){
     audio->Record();  
     Serial.println("Record end\r\n");
     Serial.println("音声認識開始");
-    avatar.setSpeechText("わかりました");  
+    AVATAR::avatar.setSpeechText("わかりました");  
     CloudSpeechClient* cloudSpeechClient = new CloudSpeechClient(root_ca_google, STT_API_KEY.c_str());
     ret = cloudSpeechClient->Transcribe(audio);
     delete cloudSpeechClient;
@@ -836,7 +751,7 @@ String SpeechToText(bool isGoogle){
     audio->Record();  
     Serial.println("Record end\r\n");
     Serial.println("音声認識開始");
-    avatar.setSpeechText("わかりました");  
+    AVATAR::avatar.setSpeechText("わかりました");  
     Whisper* cloudSpeechClient = new Whisper(root_ca_openai, OPENAI_API_KEY.c_str());
     ret = cloudSpeechClient->Transcribe(audio);
     delete cloudSpeechClient;
@@ -896,7 +811,7 @@ void setup()
     M5.Speaker.config(spk_cfg);
   }
 
-  Servo_setup();
+  SERVO_SC::init();
   delay(1000);
 
   {
@@ -1111,10 +1026,10 @@ void setup()
 #if !defined( ARDUINO_M5Stack_Core_ESP32 )
   WAKE_WORD::init();
 #endif
-  avatar.init();
-  avatar.addTask(lipSync, "lipSync");
-  avatar.addTask(servo, "servo");
-  avatar.setSpeechFont(&fonts::efontJA_16);
+  AVATAR::avatar.init();
+  AVATAR::avatar.addTask(lipSync, "lipSync");
+  AVATAR::avatar.addTask(SERVO_SC::servoTask, "servo");
+  AVATAR::avatar.setSpeechFont(&fonts::efontJA_16);
 
 //  M5.Speaker.setVolume(200);
 #if defined(ARDUINO_M5STACK_Core2) || defined( ARDUINO_M5STACK_CORES3 )
@@ -1138,11 +1053,11 @@ void report_batt_level(){
     sprintf(buff,"充電中、バッテリーのレベルは%d％です。",level);
   else
     sprintf(buff,"バッテリーのレベルは%d％です。",level);
-  avatar.setExpression(Expression::Happy);
+  AVATAR::avatar.setExpression(Expression::Happy);
   WAKE_WORD::mode = 0; 
   speech_text = String(buff);
   delay(1000);
-  avatar.setExpression(Expression::Neutral);
+  AVATAR::avatar.setExpression(Expression::Neutral);
 }
 
 void switch_monologue_mode(){
@@ -1157,11 +1072,11 @@ void switch_monologue_mode(){
       random_time = -1;
     }
     random_speak = !random_speak;
-    avatar.setExpression(Expression::Happy);
+    AVATAR::avatar.setExpression(Expression::Happy);
     WAKE_WORD::mode = 0;
     speech_text = tmp;
     delay(1000);
-    avatar.setExpression(Expression::Neutral);
+    AVATAR::avatar.setExpression(Expression::Neutral);
 }
 
 void sw_tone(){
@@ -1173,14 +1088,14 @@ void sw_tone(){
 }
 
 void SST_ChatGPT() {
-        bool prev_servo_home = servo_home;
+        bool prev_servo_home = SERVO_SC::home;
         random_speak = true;
         random_time = -1;
 #ifdef USE_SERVO
-        servo_home = true;
+        SERVO_SC::home = true;
 #endif
-        avatar.setExpression(Expression::Happy);
-        avatar.setSpeechText("御用でしょうか？");
+        AVATAR::avatar.setExpression(Expression::Happy);
+        AVATAR::avatar.setSpeechText("御用でしょうか？");
         String ret;
         if(OPENAI_API_KEY != STT_API_KEY){
           Serial.println("Google STT");
@@ -1190,7 +1105,7 @@ void SST_ChatGPT() {
           ret = SpeechToText(false);
         }
 #ifdef USE_SERVO
-        servo_home = prev_servo_home;
+        SERVO_SC::home = prev_servo_home;
 #endif
         Serial.println("音声認識終了");
         Serial.println("音声認識結果");
@@ -1202,11 +1117,11 @@ void SST_ChatGPT() {
           }
         } else {
           Serial.println("音声認識失敗");
-          avatar.setExpression(Expression::Sad);
-          avatar.setSpeechText("聞き取れませんでした");
+          AVATAR::avatar.setExpression(Expression::Sad);
+          AVATAR::avatar.setSpeechText("聞き取れませんでした");
           delay(2000);
-          avatar.setSpeechText("");
-          avatar.setExpression(Expression::Neutral);
+          AVATAR::avatar.setSpeechText("");
+          AVATAR::avatar.setExpression(Expression::Neutral);
         }
 }
 
@@ -1243,16 +1158,16 @@ void loop()
     if(WAKE_WORD::mode >= 0){
       sw_tone();
       if(WAKE_WORD::mode == 0){
-        avatar.setSpeechText("ウェイクワード有効");
+        AVATAR::avatar.setSpeechText("ウェイクワード有効");
         WAKE_WORD::mode = 1;
         WAKE_WORD::is_enable = true;
       } else {
-        avatar.setSpeechText("ウェイクワード無効");
+        AVATAR::avatar.setSpeechText("ウェイクワード無効");
         WAKE_WORD::mode = 0;
         WAKE_WORD::is_enable = false;
       }
       delay(1000);
-      avatar.setSpeechText("");
+      AVATAR::avatar.setSpeechText("");
     }
   }
 
@@ -1269,10 +1184,10 @@ void loop()
     WAKE_WORD::is_enable = false;
     WAKE_WORD::mode = -1;
 #ifdef USE_SERVO
-      servo_home = true;
+      SERVO_SC::home = true;
       delay(500);
 #endif
-    avatar.setSpeechText("ウェイクワード登録開始");
+    AVATAR::avatar.setSpeechText("ウェイクワード登録開始");
   }
 #endif
 
@@ -1297,7 +1212,7 @@ void loop()
 #ifdef USE_SERVO
       if (box_servo.contain(t.x, t.y))
       {
-        servo_home = !servo_home;
+        SERVO_SC::home = !SERVO_SC::home;
         M5.Speaker.tone(1000, 100);
       }
 #endif
@@ -1316,7 +1231,7 @@ void loop()
 #endif
 
   if(speech_text != ""){
-    avatar.setExpression(Expression::Happy);
+    AVATAR::avatar.setExpression(Expression::Happy);
     speech_text_buffer = speech_text;
     speech_text = "";
     Serial.println(speech_text_buffer);
@@ -1331,7 +1246,7 @@ void loop()
       mp3->stop();
       if(file != nullptr){delete file; file = nullptr;}
       Serial.println("mp3 stop");
-      avatar.setExpression(Expression::Neutral);
+      AVATAR::avatar.setExpression(Expression::Neutral);
       speech_text_buffer = "";
       delay(200);
       M5.Speaker.end();
@@ -1351,13 +1266,13 @@ void loop()
       return;
   } else if (WAKE_WORD::mode < 0) {
     if(WAKE_WORD::regist()){
-      avatar.setSpeechText("ウェイクワード登録終了");
+      AVATAR::avatar.setSpeechText("ウェイクワード登録終了");
       delay(1000);
-      avatar.setSpeechText("");
+      AVATAR::avatar.setSpeechText("");
       WAKE_WORD::mode = 0;
       WAKE_WORD::is_enable = false;
 #ifdef USE_SERVO
-      servo_home = false;
+      SERVO_SC::home = false;
 #endif
     }
   }
