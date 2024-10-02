@@ -7,18 +7,10 @@
 #include "AudioFileSourceHTTPSStream.h"
 //#include "AudioOutputM5Speaker.h"
 
-//-----------------------------------------------------
-extern String VOICEVOX_API_KEY;
-extern AudioGeneratorMP3 *mp3;
-extern AudioFileSourceBuffer *buff;
-extern AudioFileSourceHTTPSStream *file;
-extern int preallocateBufferSize;
-extern uint8_t *preallocateBuffer;
-//extern AudioOutputM5Speaker out;
-void StatusCallback(void *cbData, int code, const char *string);
-void playMP3(AudioFileSourceBuffer *buff);
-//-----------------------------------------------------
+#include "driver_apikey.hpp"
+#include "driver_text_to_speech.hpp"
 
+//-----------------------------------------------------
 String https_get(const char* url, const char* root_ca) {
   String payload = "";
   WiFiClientSecure *client = new WiFiClientSecure;
@@ -226,20 +218,21 @@ static String URLEncode(const char* msg) {
 // char *tts_parms05 = "&speaker=45";
 // char *tts_parms06 = "&speaker=3";
 
-void Voicevox_tts(char *text,char *tts_parms){
+void Voicevox_tts(char *text,char *tts_parms)
+{
 //  String tts_url = String("https://api.tts.quest/v1/voicevox/?text=") +  URLEncode(text) + String(tts_parms);
 //  String tts_url = String("https://api.tts.quest/v3/voicevox/synthesis?key=y958S773N4I7356&text=") +  URLEncode(text) + String(tts_parms);
-  String tts_url = String("https://api.tts.quest/v3/voicevox/synthesis?key=")+ VOICEVOX_API_KEY +  String("&text=") +  URLEncode(text) + String(tts_parms);
+  String tts_url = String("https://api.tts.quest/v3/voicevox/synthesis?key=")+ APIKEY::VOICEVOX_API_KEY +  String("&text=") +  URLEncode(text) + String(tts_parms);
   String URL = voicevox_tts_url(tts_url.c_str(), root_ca);
   Serial.println(tts_url);
 
   if(URL == "") return;
 //  while(!voicevox_tts_json_status(tts_status_url.c_str(), "isAudioReady", root_ca)) delay(1);
 //delay(2500);
-  file = new AudioFileSourceHTTPSStream(URL.c_str(), root_ca);
+  TTS::audio_file = new AudioFileSourceHTTPSStream(URL.c_str(), root_ca);
 //  file->RegisterStatusCB(StatusCallback, (void*)"file");
 //  buff = new AudioFileSourceBuffer(file, preallocateBuffer, preallocateBufferSize);
-  buff = new AudioFileSourceBuffer(file, 5*1024);
+  TTS::audio_buff = new AudioFileSourceBuffer(TTS::audio_file, 5*1024);
 //  mp3->begin(buff, &out);
-  playMP3(buff);
+  TTS::playMP3(TTS::audio_buff);
 }

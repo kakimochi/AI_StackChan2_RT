@@ -7,25 +7,18 @@
 #include "driver_avatar.hpp"
 // #include <Avatar.h>
 
-#include <AudioOutput.h>
-#include <AudioFileSourceBuffer.h>
-#include <AudioGeneratorMP3.h>
-#include "AudioFileSourceHTTPSStream.h"
-#include "AudioOutputM5Speaker.h"
-#include "WebVoiceVoxTTS.h"
-
+#include "driver_apikey.hpp"
+#include "driver_text_to_speech.hpp"
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
-#include "rootCACertificate.h"
-#include "rootCAgoogle.h"
+
 #include <ArduinoJson.h>
 #include <ESP32WebServer.h>
 //#include <ESPmDNS.h>
 #include <deque>
-#include "AudioWhisper.h"
-#include "Whisper.h"
-#include "Audio.h"
-#include "CloudSpeechClient.h"
+
+#include "driver_speech_to_text.hpp"
+
 #include "driver_wake_word.hpp"
 #include "driver_servo.hpp"
 
@@ -38,25 +31,10 @@ std::deque<String> chatHistory;
 #define USE_SDCARD
 #define WIFI_SSID "SET YOUR WIFI SSID"
 #define WIFI_PASS "SET YOUR WIFI PASS"
-#define OPENAI_APIKEY "SET YOUR OPENAI APIKEY"
-#define VOICEVOX_APIKEY "SET YOUR VOICEVOX APIKEY"
-#define STT_APIKEY "SET YOUR STT APIKEY"
 
 //#define USE_INTERNAL_MIC // タカオ版でM5Stack Core2やS3で内蔵マイクを使いたい場合はコメントアウトする。
 
-/// set M5Speaker virtual channel (0-7)
-static constexpr uint8_t m5spk_virtual_channel = 0;
-
 ESP32WebServer server(80);
-
-//---------------------------------------------
-String OPENAI_API_KEY = "";
-String VOICEVOX_API_KEY = "";
-String STT_API_KEY = "";
-String TTS_SPEAKER_NO = "3";
-String TTS_SPEAKER = "&speaker=";
-String TTS_PARMS = TTS_SPEAKER + TTS_SPEAKER_NO;
-//---------------------------------------------
 
 //---------------------------------------------
 // C++11 multiline string constants are neato...
@@ -212,14 +190,14 @@ void handle_speech() {
   String message = server.arg("say");
   String speaker = server.arg("voice");
   if(speaker != "") {
-    TTS_PARMS = TTS_SPEAKER + speaker;
+    TTS::TTS_PARMS = TTS::TTS_SPEAKER + speaker;
   }
   Serial.println(message);
   ////////////////////////////////////////
   // 音声の発声
   ////////////////////////////////////////
   AVATAR::avatar.setExpression(Expression::Happy);
-  Voicevox_tts((char*)message.c_str(), (char*)TTS_PARMS.c_str());
+  Voicevox_tts((char*)message.c_str(), (char*)TTS::TTS_PARMS.c_str());
   server.send(200, "text/plain", String("OK"));
 }
 
@@ -238,7 +216,7 @@ String https_post_json(const char* url, const char* json_string, const char* roo
         Serial.print("[HTTPS] POST...\n");
         // start connection and send HTTP header
         https.addHeader("Content-Type", "application/json");
-        https.addHeader("Authorization", String("Bearer ") + OPENAI_API_KEY);
+        https.addHeader("Authorization", String("Bearer ") + APIKEY::OPENAI_API_KEY);
         int httpCode = https.POST((uint8_t *)json_string, strlen(json_string));
   
         // httpCode will be negative on error
@@ -314,7 +292,7 @@ void handle_chat() {
   String text = server.arg("text");
   String speaker = server.arg("voice");
   if(speaker != "") {
-    TTS_PARMS = TTS_SPEAKER + speaker;
+    TTS::TTS_PARMS = TTS::TTS_SPEAKER + speaker;
   }
   Serial.println(InitBuffer);
   init_chat_doc(InitBuffer.c_str());
@@ -445,9 +423,9 @@ void handle_apikey_set() {
   // voicetxt
   String sttapikey = server.arg("sttapikey");
  
-  OPENAI_API_KEY = openai;
-  VOICEVOX_API_KEY = voicevox;
-  STT_API_KEY = sttapikey;
+  APIKEY::OPENAI_API_KEY = openai;
+  APIKEY::VOICEVOX_API_KEY = voicevox;
+  APIKEY::STT_API_KEY = sttapikey;
   Serial.println(openai);
   Serial.println(voicevox);
   Serial.println(sttapikey);
@@ -571,8 +549,8 @@ void handle_setting() {
     if(speaker_no > 60) {
       speaker_no = 60;
     }
-    TTS_SPEAKER_NO = String(speaker_no);
-    TTS_PARMS = TTS_SPEAKER + TTS_SPEAKER_NO;
+    TTS::TTS_SPEAKER_NO = String(speaker_no);
+    TTS::TTS_PARMS = TTS::TTS_SPEAKER + TTS::TTS_SPEAKER_NO;
   }
 
   if(value == "") value = "180";
@@ -592,20 +570,11 @@ void handle_setting() {
     nvs_close(nvs_handle);
   }
   M5.Speaker.setVolume(volume);
-  M5.Speaker.setChannelVolume(m5spk_virtual_channel, volume);
+  M5.Speaker.setChannelVolume(TTS::m5spk_virtual_channel, volume);
   server.send(200, "text/plain", String("OK"));
 }
 
-AudioOutputM5Speaker out(&M5.Speaker, m5spk_virtual_channel);
-AudioGeneratorMP3 *mp3;
-AudioFileSourceBuffer *buff = nullptr;
-//int preallocateBufferSize = 30*1024;
-uint8_t *preallocateBuffer;
-AudioFileSourceHTTPSStream *file = nullptr;
 
-void playMP3(AudioFileSourceBuffer *buff){
-  mp3->begin(buff, &out);
-}
 
 // Called when a metadata event occurs (i.e. an ID3 tag, an ICY block, etc.
 void MDCallback(void *cbData, const char *type, bool isUnicode, const char *string)
@@ -642,7 +611,7 @@ void lipSync(void *args)
   // Avatar *avatar = ctx->getAvatar();
   for (;;)
   {
-    level = abs(*out.getBuffer());
+    level = abs(*TTS::audio_out.getBuffer());
     if(level<100) level = 0;
     if(level > 15000)
     {
@@ -732,34 +701,6 @@ void Wifi_setup() {
   }
 }
 
-String SpeechToText(bool isGoogle){
-  Serial.println("\r\nRecord start!\r\n");
-
-  String ret = "";
-  if( isGoogle) {
-    Audio* audio = new Audio();
-    audio->Record();  
-    Serial.println("Record end\r\n");
-    Serial.println("音声認識開始");
-    AVATAR::avatar.setSpeechText("わかりました");  
-    CloudSpeechClient* cloudSpeechClient = new CloudSpeechClient(root_ca_google, STT_API_KEY.c_str());
-    ret = cloudSpeechClient->Transcribe(audio);
-    delete cloudSpeechClient;
-    delete audio;
-  } else {
-    AudioWhisper* audio = new AudioWhisper();
-    audio->Record();  
-    Serial.println("Record end\r\n");
-    Serial.println("音声認識開始");
-    AVATAR::avatar.setSpeechText("わかりました");  
-    Whisper* cloudSpeechClient = new Whisper(root_ca_openai, OPENAI_API_KEY.c_str());
-    ret = cloudSpeechClient->Transcribe(audio);
-    delete cloudSpeechClient;
-    delete audio;
-  }
-  return ret;
-}
-
 void setup()
 {
   auto cfg = M5.config();
@@ -823,14 +764,14 @@ void setup()
       nvs_get_u32(nvs_handle, "volume", &volume);
       if(volume > 255) volume = 255;
       M5.Speaker.setVolume(volume);
-      M5.Speaker.setChannelVolume(m5spk_virtual_channel, volume);
+      M5.Speaker.setChannelVolume(TTS::m5spk_virtual_channel, volume);
       nvs_get_u8(nvs_handle, "led", &led_onoff);
       // if(led_onoff == 1) Use_LED = true;
       // else  Use_LED = false;
       nvs_get_u8(nvs_handle, "speaker", &speaker_no);
       if(speaker_no > 60) speaker_no = 3;
-      TTS_SPEAKER_NO = String(speaker_no);
-      TTS_PARMS = TTS_SPEAKER + TTS_SPEAKER_NO;
+      TTS::TTS_SPEAKER_NO = String(speaker_no);
+      TTS::TTS_PARMS = TTS::TTS_SPEAKER + TTS::TTS_SPEAKER_NO;
       nvs_close(nvs_handle);
     } else {
       if (ESP_OK == nvs_open("setting", NVS_READWRITE, &nvs_handle)) {
@@ -842,10 +783,10 @@ void setup()
         nvs_set_u8(nvs_handle, "speaker", speaker_no);
         nvs_close(nvs_handle);
         M5.Speaker.setVolume(volume);
-        M5.Speaker.setChannelVolume(m5spk_virtual_channel, volume);
+        M5.Speaker.setChannelVolume(TTS::m5spk_virtual_channel, volume);
         // Use_LED = false;
-        TTS_SPEAKER_NO = String(speaker_no);
-        TTS_PARMS = TTS_SPEAKER + TTS_SPEAKER_NO;
+        TTS::TTS_SPEAKER_NO = String(speaker_no);
+        TTS::TTS_PARMS = TTS::TTS_SPEAKER + TTS::TTS_SPEAKER_NO;
       }
     }
   }
@@ -857,9 +798,9 @@ void setup()
   WiFi.mode(WIFI_STA);
 #ifndef USE_SDCARD
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  OPENAI_API_KEY = String(OPENAI_APIKEY);
-  VOICEVOX_API_KEY = String(VOICEVOX_APIKEY);
-  STT_API_KEY = String(STT_APIKEY);
+  APIKEY::OPENAI_API_KEY = String(OPENAI_APIKEY);
+  APIKEY::VOICEVOX_API_KEY = String(VOICEVOX_APIKEY);
+  APIKEY::STT_API_KEY = String(STT_APIKEY);
 #else
   /// settings
   if (SD.begin(GPIO_NUM_4, SPI, 25000000)) {
@@ -942,12 +883,12 @@ void setup()
         if(ESP_OK == nvs_get_str(nvs_handle, "openai", openai_apikey, &length1) && 
            ESP_OK == nvs_get_str(nvs_handle, "voicevox", voicevox_apikey, &length2) &&
            ESP_OK == nvs_get_str(nvs_handle, "sttapikey", stt_apikey, &length3)) {
-          OPENAI_API_KEY = String(openai_apikey);
-          VOICEVOX_API_KEY = String(voicevox_apikey);
-          STT_API_KEY = String(stt_apikey);
-          // Serial.println(OPENAI_API_KEY);
-          // Serial.println(VOICEVOX_API_KEY);
-          // Serial.println(STT_API_KEY);
+          APIKEY::OPENAI_API_KEY = String(openai_apikey);
+          APIKEY::VOICEVOX_API_KEY = String(voicevox_apikey);
+          APIKEY::STT_API_KEY = String(stt_apikey);
+          // Serial.println(APIKEY::OPENAI_API_KEY);
+          // Serial.println(APIKEY::VOICEVOX_API_KEY);
+          // Serial.println(APIKEY::STT_API_KEY);
         }
       }
       nvs_close(nvs_handle);
@@ -1021,7 +962,7 @@ void setup()
   delay(3000);
 
   audioLogger = &Serial;
-  mp3 = new AudioGeneratorMP3();
+  TTS::mp3 = new AudioGeneratorMP3();
 //  mp3->RegisterStatusCB(StatusCallback, (void*)"mp3");
 #if !defined( ARDUINO_M5Stack_Core_ESP32 )
   WAKE_WORD::init();
@@ -1097,12 +1038,12 @@ void SST_ChatGPT() {
         AVATAR::avatar.setExpression(Expression::Happy);
         AVATAR::avatar.setSpeechText("御用でしょうか？");
         String ret;
-        if(OPENAI_API_KEY != STT_API_KEY){
+        if(APIKEY::OPENAI_API_KEY != APIKEY::STT_API_KEY){
           Serial.println("Google STT");
-          ret = SpeechToText(true);
+          ret = STT::SpeechToText(true);
         } else {
           Serial.println("Whisper STT");
-          ret = SpeechToText(false);
+          ret = STT::SpeechToText(false);
         }
 #ifdef USE_SERVO
         SERVO_SC::home = prev_servo_home;
@@ -1111,7 +1052,7 @@ void SST_ChatGPT() {
         Serial.println("音声認識結果");
         if(ret != "") {
           Serial.println(ret);
-          if (!mp3->isRunning() && speech_text=="" && speech_text_buffer == "") {
+          if (!TTS::mp3->isRunning() && speech_text=="" && speech_text_buffer == "") {
             exec_chatGPT(ret);
             WAKE_WORD::mode = 0;
           }
@@ -1133,7 +1074,7 @@ void loop()
   {
     lastms1 = millis();
     random_time = 40000 + 1000 * random(30);
-    if (!mp3->isRunning() && speech_text=="" && speech_text_buffer == "") {
+    if (!TTS::mp3->isRunning() && speech_text=="" && speech_text_buffer == "") {
       exec_chatGPT(random_words[random(18)]);
       WAKE_WORD::mode = 0;
     }
@@ -1204,7 +1145,7 @@ void loop()
     auto t = M5.Touch.getDetail();
     if (t.wasPressed())
     {          
-      if (box_stt.contain(t.x, t.y)&&(!mp3->isRunning()))
+      if (box_stt.contain(t.x, t.y)&&(!TTS::mp3->isRunning()))
       {
         sw_tone();
         SST_ChatGPT();
@@ -1238,13 +1179,13 @@ void loop()
     M5.Mic.end();
     M5.Speaker.begin();
     WAKE_WORD::mode = 0;
-    Voicevox_tts((char*)speech_text_buffer.c_str(), (char*)TTS_PARMS.c_str());
+    Voicevox_tts((char*)speech_text_buffer.c_str(), (char*)TTS::TTS_PARMS.c_str());
   }
 
-  if (mp3->isRunning()) {
-    if (!mp3->loop()) {
-      mp3->stop();
-      if(file != nullptr){delete file; file = nullptr;}
+  if (TTS::mp3->isRunning()) {
+    if (!TTS::mp3->loop()) {
+      TTS::mp3->stop();
+      if(TTS::audio_file != nullptr){delete TTS::audio_file; TTS::audio_file = nullptr;}
       Serial.println("mp3 stop");
       AVATAR::avatar.setExpression(Expression::Neutral);
       speech_text_buffer = "";
